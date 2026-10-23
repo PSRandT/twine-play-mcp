@@ -234,6 +234,7 @@ export class SessionManager {
   protected contextOptions(): BrowserContextOptions { return {}; }
   protected async configureContext(_context: BrowserContext, _entryUrl: string): Promise<void> {}
   protected persistDownloads = true;
+  protected newGameId(): string { return 'game_' + crypto.randomBytes(3).toString('hex'); }
 
   private async launchBrowser(headless: boolean): Promise<Browser> {
     const attempts: Array<Record<string, unknown>> = [];
@@ -307,7 +308,7 @@ export class SessionManager {
 
       await this.configureContext(context, entryUrl);
 
-      const id = 'game_' + crypto.randomBytes(3).toString('hex');
+      const id = this.newGameId();
       const session: GameSession = {
         id,
         source: opts.source,

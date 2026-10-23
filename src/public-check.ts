@@ -15,6 +15,7 @@ export type AcceptanceReport = {
  * game ids, or raw SDK errors (errors can contain request URLs). No browser/network bypasses. */
 export async function runPublicAcceptance(origin: string, secret: string, report: AcceptanceReport) {
   const sessions: Array<{ client: Client; transport: StreamableHTTPClientTransport }> = [];
+  const currentGames = new Map<Client, string>();
   let stage = 'public HTTPS URL';
   const ensure = (condition: unknown) => {
     if (!condition) throw new Error('Check failed');
@@ -32,8 +33,16 @@ export async function runPublicAcceptance(origin: string, secret: string, report
   };
   const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => {
     stage = name;
-    const result = await client.callTool({ name, arguments: args });
+    const handle = currentGames.get(client);
+    const result = await client.callTool({ name, arguments: name !== 'open_game' && handle ? { game_id: handle, ...args } : args });
     ensure(!result.isError);
+    if (name === 'open_game') {
+      const blocks = result.content as Array<{ type: string; text?: string }>;
+      const handle = blocks.filter((p) => p.type === 'text').map((p) => p.text ?? '').join('\n').match(/game_[a-f0-9]{64}/)?.[0];
+      ensure(handle);
+      currentGames.set(client, handle!);
+    }
+    if (name === 'session' && args.action === 'close') currentGames.delete(client);
     return result;
   };
   const text = (result: any) =>
@@ -121,8 +130,11 @@ export async function runPublicAcceptance(origin: string, secret: string, report
     const gameB = await json(b, 'open_game', { source: new URL('/fixtures/sugarcube.html', origin).href });
     await call(a, 'choose', { choice: 1 });
     ensure((await json(b, 'observe')).text === gameB.text);
-    ensure((await b.callTool({ name: 'observe', arguments: { game_id: gameA.game_id } })).isError);
+    ensure((await b.callTool({ name: 'observe', arguments: { game_id: gameA.game_id.slice(0, 11) } })).isError);
     pass('session-isolation');
+    const resumed = await connect();
+    ensure((await json(resumed, 'observe', { game_id: gameA.game_id })).game_id === gameA.game_id);
+    pass('cross-connection-game-resume');
     stage = 'file and private URL rejection';
     for (const source of [
       '/etc/passwd',
@@ -141,6 +153,8 @@ export async function runPublicAcceptance(origin: string, secret: string, report
     console.error(`[public acceptance] FAIL at ${stage}; credential-bearing errors omitted`);
   } finally {
     for (const { client, transport } of sessions) {
+      const handle = currentGames.get(client);
+      if (handle) await client.callTool({ name: 'session', arguments: { action: 'close', game_id: handle } }).catch(() => {});
       await transport.terminateSession().catch(() => {});
       await client.close().catch(() => {});
     }

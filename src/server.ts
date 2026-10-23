@@ -1,4 +1,4 @@
-import { remoteRegistrar, REMOTE_INSTRUCTIONS } from './remote-profile.js';
+import { remoteRegistrar, REMOTE_INSTRUCTIONS, type RemoteToolRunner } from './remote-profile.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
@@ -144,7 +144,7 @@ function observationText(session: GameSession, obs: Observation, sinceLast: bool
   });
 }
 
-export function buildServer(manager: SessionManager, profile: 'local' | 'remote-chatgpt' = 'local'): McpServer {
+export function buildServer(manager: SessionManager, profile: 'local' | 'remote-chatgpt' = 'local', run?: RemoteToolRunner): McpServer {
   const server = new McpServer(
     { name: 'twine-play-mcp', version: VERSION },
     {
@@ -159,7 +159,7 @@ export function buildServer(manager: SessionManager, profile: 'local' | 'remote-
     }
   );
 
-  const register = profile === 'remote-chatgpt' ? remoteRegistrar(server) : server.registerTool.bind(server);
+  const register = profile === 'remote-chatgpt' ? remoteRegistrar(server, run) : server.registerTool.bind(server);
 
   register(
     'open_game',

@@ -24,10 +24,14 @@ PLAYBACK / PACING POLICY:
 - Automatic continuation is allowed only for short non-interactive transitions.
 - Stop whenever a new meaningful choice, major revelation, character interaction, or emotional beat appears.
 - Never turn a full chapter into a compressed recap unless the user asks for a summary or speedrun.
-Remote games require public HTTPS. Use screenshot for the real viewport; there is no live_view or local file access. Keep the same MCP session and game_id across turns. If a session expired, explain the loss; never silently start over. Game sessions and snapshots are temporary and are lost on server restart. Close games when finished. Never print the private MCP URL.`;
+Remote games require public HTTPS. Use screenshot for the real viewport; there is no live_view or local file access. Always pass the exact opaque game_id returned by open_game on every subsequent game tool call, including observe, choose, screenshot, snapshot and session close. It is the authorization credential that resumes this game across MCP connections; keep it internal, never show it in narration or invent/shorten it. Without that handle, tools cannot find or enumerate games. If a game expired, explain the loss; never silently start over. Game sessions and snapshots are temporary and are lost on server restart. Close games when finished. Never print the private MCP URL.`;
+
+export type RemoteToolRunner = (
+  name: string, args: any, callback: (args: any) => Promise<CallToolResult>,
+) => Promise<CallToolResult>;
 
 // Preserve the original typed registration API and handlers; filter/validate only the remote surface.
-export function remoteRegistrar(server: McpServer): McpServer['registerTool'] {
+export function remoteRegistrar(server: McpServer, run?: RemoteToolRunner): McpServer['registerTool'] {
   const original = server.registerTool.bind(server);
   // The SDK overload is generic over each tool's schema. This boundary adapts that schema,
   // while all original handlers retain compile-time inference at their call sites.
@@ -35,6 +39,11 @@ export function remoteRegistrar(server: McpServer): McpServer['registerTool'] {
     if (!REMOTE_TOOLS.includes(name)) return undefined;
     const shape = { ...config.inputSchema } as Record<string, z.ZodType>;
     let description = config.description;
+    if (shape.game_id) {
+      shape.game_id = z.string().max(80).optional().describe(
+        'Exact opaque game_id returned by open_game. Required to resume the same game across tool calls; never shorten it.',
+      );
+    }
     if (name === 'open_game') {
       delete shape.headless;
       delete shape.seed;
@@ -85,7 +94,8 @@ export function remoteRegistrar(server: McpServer): McpServer['registerTool'] {
       async (args: any, extra: any): Promise<CallToolResult> => {
         if (JSON.stringify(args).length > 20_000)
           return { isError: true, content: [{ type: 'text', text: 'Tool input exceeds limit.' }] };
-        const result = (await callback(args, extra)) as CallToolResult;
+        const result = run ? await run(name, args, (scopedArgs) => callback(scopedArgs, extra))
+          : (await callback(args, extra)) as CallToolResult;
         let remaining = 48_000;
         result.content = result.content.map((part) => {
           if (part.type !== 'text') return part;

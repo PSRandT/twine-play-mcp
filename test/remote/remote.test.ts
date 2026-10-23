@@ -113,7 +113,7 @@ test(
             last = n;
             assert.equal((await json(a, 'observe')).text, last.text);
           }
-          assert.equal((await a.callTool({ name: 'observe', arguments: { game_id: initialB.game_id } })).isError, true);
+          assert.equal((await a.callTool({ name: 'observe', arguments: { game_id: initialB.game_id.slice(0, 11) } })).isError, true);
           assert.equal((await json(b, 'observe')).text, initialB.text);
           assert.equal(
             (await b.callTool({ name: 'snapshot', arguments: { action: 'load', name: 'branch' } })).isError,
@@ -214,17 +214,17 @@ test(
 );
 
 test(
-  'two game cap, DELETE cleanup, idle/lifetime cleanup release contexts and snapshots',
+  'two game cap, explicit game close, transport reconnection and idle cleanup',
   { timeout: 60000 },
   async () => {
     const h = await harness({ sweepMs: 50, idleMs: 30_000, lifetimeMs: 30_000 });
     try {
       const { client, transport } = await h.client();
-      await call(client, 'open_game', { source: 'https://fixture.example.org/sugarcube.html' });
+      const game1 = await json(client, 'open_game', { source: 'https://fixture.example.org/sugarcube.html' });
       const manager = h.managers[0]!;
       const first = [...manager.sessions.values()][0]!;
       await call(client, 'snapshot', { action: 'save', name: 'temporary' });
-      await call(client, 'open_game', { source: 'https://fixture.example.org/harlowe.html' });
+      const game2 = await json(client, 'open_game', { source: 'https://fixture.example.org/harlowe.html' });
       assert.equal(
         (
           await client.callTool({
@@ -234,14 +234,19 @@ test(
         ).isError,
         true,
       );
-      await manager.expireIdle(0);
+      await call(client, 'session', { action: 'close', game_id: game1.game_id });
+      await call(client, 'session', { action: 'close', game_id: game2.game_id });
       assert.equal(manager.sessions.size, 0);
       assert.equal(first.page.isClosed(), true);
-      await call(client, 'open_game', { source: 'https://fixture.example.org/chapbook.html' });
-      const active = [...manager.sessions.values()][0]!;
+      assert.equal(first.snapshots.size, 0);
+      const game3 = await json(client, 'open_game', { source: 'https://fixture.example.org/chapbook.html' });
+      const active = [...h.managers[2]!.sessions.values()][0]!;
       await transport.terminateSession();
       await delay(50);
-      assert.equal(manager.sessions.size, 0);
+      assert.equal(active.page.isClosed(), false);
+      const resumed = await h.client();
+      assert.equal((await json(resumed.client, 'observe', { game_id: game3.game_id })).text, game3.text);
+      await call(resumed.client, 'session', { action: 'close', game_id: game3.game_id });
       assert.equal(active.page.isClosed(), true);
     } finally {
       await h.close();
@@ -308,7 +313,7 @@ test('rate limiting, hard lifetime and aborted tool request close owned contexts
         jsonrpc: '2.0',
         id: 1234,
         method: 'tools/call',
-        params: { name: 'observe', arguments: { wait_ms: 10000 } },
+        params: { name: 'observe', arguments: { game_id: [...aborted.managers[0]!.sessions.keys()][0], wait_ms: 10000 } },
       }),
       signal: controller.signal,
     }).catch(() => {});

@@ -1,4 +1,5 @@
 import type { BrowserContext, BrowserContextOptions, LaunchOptions } from 'playwright-core';
+import { randomBytes } from 'node:crypto';
 import { SessionManager, type GameSession, type OpenGameOptions } from './session.js';
 import { publicHttpsUrl } from './network-policy.js';
 
@@ -16,6 +17,7 @@ export class ContextBudget {
 
 export class RemoteSessionManager extends SessionManager {
   protected override persistDownloads = false;
+  protected override newGameId(): string { return 'game_' + randomBytes(32).toString('hex'); }
   private touched = new Map<string, number>();
   private pending = 0;
   private disposed = false;

@@ -13,7 +13,8 @@ import { RemoteSessionManager } from '../../src/remote-session.js';
 import { resolvePublic } from '../../src/network-policy.js';
 
 export async function harness(
-  limits: { idleMs?: number; lifetimeMs?: number; sweepMs?: number; clock?: () => number } = {},
+  limits: { idleMs?: number; lifetimeMs?: number; sweepMs?: number; clock?: () => number;
+    configureManager?: (manager: RemoteSessionManager) => void } = {},
 ) {
   process.env.TWMCP_CHROME_PATH ??= '/usr/bin/chromium';
   const dir = mkdtempSync(path.join(os.tmpdir(), 'twine-test-'));
@@ -112,6 +113,7 @@ export async function harness(
     ...limits,
     managerFactory: (proxy, budget) => {
       const m = new FixtureManager(proxy, budget);
+      limits.configureManager?.(m);
       managers.push(m);
       return m;
     },
@@ -130,7 +132,8 @@ export async function harness(
     async client() {
       const client = new Client({ name: 'remote-acceptance', version: '1.0.0' });
       const transport = new StreamableHTTPClientTransport(url);
-      await client.connect(transport);
+      try { await client.connect(transport); }
+      catch (err) { await client.close().catch(() => {}); throw err; }
       clients.push({ client, transport });
       return { client, transport };
     },
@@ -152,9 +155,17 @@ export const textOf = (result: any): string =>
     .filter((p: any) => p.type === 'text')
     .map((p: any) => p.text)
     .join('\n');
+const activeGame = new WeakMap<Client, string>();
 export async function call(client: Client, name: string, args: Record<string, unknown> = {}) {
-  const r = await client.callTool({ name, arguments: args });
+  const handle = activeGame.get(client);
+  const scoped = name !== 'open_game' && handle ? { game_id: handle, ...args } : args;
+  const r = await client.callTool({ name, arguments: scoped });
   if (r.isError) throw new Error(`${name}: ${textOf(r)}`);
+  if (name === 'open_game') {
+    const match = textOf(r).match(/game_[a-f0-9]{64}/);
+    if (match) activeGame.set(client, match[0]);
+  }
+  if (name === 'session' && args.action === 'close' && scoped.game_id === handle) activeGame.delete(client);
   return r;
 }
 export async function json(client: Client, name: string, args: Record<string, unknown> = {}) {

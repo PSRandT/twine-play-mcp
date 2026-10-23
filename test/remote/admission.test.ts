@@ -29,7 +29,7 @@ test('metadata scans and disconnected discovery clients do not block real game p
     for (let i = 0; i < 8; i++) {
       const { client, transport } = await h.client();
       await client.listTools();
-      assert.equal((await client.callTool({ name: 'observe', arguments: { game_id: first.game_id } })).isError, true);
+      assert.equal((await client.callTool({ name: 'observe', arguments: { game_id: first.game_id.slice(0, 11) } })).isError, true);
       await transport.terminateSession();
       await client.close();
     }
@@ -38,7 +38,7 @@ test('metadata scans and disconnected discovery clients do not block real game p
     assert.ok(next.step > first.step);
     await call(player, 'snapshot', { action: 'load', name: 'before-scans' });
     assert.equal((await json(player, 'observe')).text, first.text);
-    const oldBrowser = [...h.managers[3]!.sessions.values()][0]!.context.browser()!;
+    const oldBrowser = [...h.managers[0]!.sessions.values()][0]!.context.browser()!;
     await call(player, 'session', { action: 'close' });
     assert.equal(oldBrowser.isConnected(), false, 'an empty connection must not retain Chrome');
     const reopened = await json(player, 'open_game', { source: 'https://fixture.example.org/sugarcube.html' });
@@ -76,18 +76,19 @@ test('bounded connection pool reclaims idle scans while preserving games and sna
 
 test('a pending first game load is not reclaimed as an empty scan', { timeout: 20_000 }, async () => {
   let clock = 0;
-  const h = await harness({ clock: () => clock, sweepMs: 20 });
   let release!: () => void;
   let started!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
   const loading = new Promise<void>((r) => { started = r; });
-  try {
-    const { client } = await h.client();
-    h.managers[0]!.open = async () => {
+  const h = await harness({ clock: () => clock, sweepMs: 20, configureManager: (manager) => {
+    manager.open = async () => {
       started();
       await gate;
       throw new Error('Simulated interrupted page load');
     };
+  } });
+  try {
+    const { client } = await h.client();
     const pending = client.callTool({ name: 'open_game', arguments: { source: 'https://fixture.example.org/game.html' } });
     await loading;
     for (let i = 0; i < 15; i++) await h.client();

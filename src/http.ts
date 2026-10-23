@@ -9,6 +9,7 @@ import { buildServer } from './server.js';
 import { ContextBudget, RemoteSessionManager } from './remote-session.js';
 import { createEgressProxy } from './egress-proxy.js';
 import { secretPathSegment } from './private-endpoint.js';
+import { GameRegistry, type GameBinding } from './game-registry.js';
 
 const MAX_BODY = 32 * 1024;
 const MAX_MCP_SESSIONS = 16;
@@ -31,10 +32,16 @@ export async function createHttpService(options: {
   const clock = options.clock ?? Date.now;
   const proxy = options.proxy ? undefined : await createEgressProxy();
   const budget = new ContextBudget(4);
+  const registry = new GameRegistry(
+    () => options.managerFactory
+      ? options.managerFactory(options.proxy ?? proxy!.url, budget)
+      : new RemoteSessionManager(options.proxy ?? proxy!.url, budget, clock),
+    clock, options.idleMs, options.lifetimeMs,
+  );
   type Owner = {
     transport: StreamableHTTPServerTransport;
     mcp: ReturnType<typeof buildServer>;
-    manager: RemoteSessionManager;
+    binding: GameBinding;
     created: number;
     touched: number;
     busy: boolean;
@@ -46,18 +53,20 @@ export async function createHttpService(options: {
   const allOwners = new Set<Owner>();
   let stopping = false;
   let attempts: number[] = [];
-  const remove = async (owner: Owner) => {
+  const remove = async (owner: Owner, abortGame = false) => {
     if (owner.closing) return;
     owner.closing = true;
     if (owner.transport.sessionId) owners.delete(owner.transport.sessionId);
     allOwners.delete(owner);
-    await owner.manager.closeAll();
+    if (abortGame || owner.busy) await registry.cancel(owner.binding);
+    registry.detach(owner.binding);
     await owner.mcp.close().catch(() => undefined);
   };
   const sweep = setInterval(() => {
     const now = clock();
+    void registry.sweep().catch(() => console.error('[twine-play-mcp] game cleanup failed'));
     for (const owner of allOwners) {
-      const idleLimit = owner.manager.sessions.size === 0
+      const idleLimit = owner.binding.games.size === 0
         ? Math.min(options.idleMs ?? EMPTY_SESSION_IDLE_MS, EMPTY_SESSION_IDLE_MS)
         : (options.idleMs ?? 30 * 60_000);
       if (
@@ -65,7 +74,6 @@ export async function createHttpService(options: {
         (!owner.busy && now - owner.touched > idleLimit)
       )
         void remove(owner);
-      else if (!owner.busy) void owner.manager.expireIdle();
     }
   }, options.sweepMs ?? 60_000);
   sweep.unref();
@@ -172,7 +180,7 @@ export async function createHttpService(options: {
         // or a pending request. A grace period protects fresh handshakes.
         if (allOwners.size >= MAX_MCP_SESSIONS) {
           const candidate = [...allOwners]
-            .filter((o) => !o.busy && o.manager.sessions.size === 0 && now - o.touched >= EMPTY_SESSION_RECLAIM_MS)
+            .filter((o) => !o.busy && o.binding.games.size === 0 && now - o.touched >= EMPTY_SESSION_RECLAIM_MS)
             .sort((a, b) => a.touched - b.touched)[0];
           if (candidate) await remove(candidate);
         }
@@ -183,10 +191,8 @@ export async function createHttpService(options: {
           reply(res, 429, 'MCP connection capacity reached; retry after Retry-After seconds');
           return;
         }
-        const manager = options.managerFactory
-          ? options.managerFactory(options.proxy ?? proxy!.url, budget)
-          : new RemoteSessionManager(options.proxy ?? proxy!.url, budget);
-        const mcp = buildServer(manager, 'remote-chatgpt');
+        const binding = registry.bind();
+        const mcp = buildServer(registry.manager, 'remote-chatgpt', registry.runner(binding));
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: randomUUID,
           enableJsonResponse: true,
@@ -197,7 +203,7 @@ export async function createHttpService(options: {
         owner = {
           transport,
           mcp,
-          manager,
+          binding,
           created: now,
           touched: now,
           busy: false,
@@ -231,10 +237,10 @@ export async function createHttpService(options: {
       const current = owner;
       const timer = setTimeout(() => {
         reply(res, 504, 'Tool timeout; session closed');
-        void remove(current);
+        void remove(current, true);
       }, 45_000);
       const disconnected = () => {
-        if (!res.writableFinished) void remove(current);
+        if (!res.writableFinished) void remove(current, true);
       };
       res.on('close', disconnected);
       try {
@@ -249,7 +255,6 @@ export async function createHttpService(options: {
       if (owner && !owner.transport.sessionId) await remove(owner);
     } finally {
       if (owner && locked) {
-        for (const game of owner.manager.sessions.values()) game.journal = game.journal.slice(-200);
         owner.busy = false;
         owner.touched = clock();
       }
@@ -263,7 +268,8 @@ export async function createHttpService(options: {
     async close() {
       stopping = true;
       clearInterval(sweep);
-      await Promise.all([...allOwners].map(remove));
+      await Promise.all([...allOwners].map((owner) => remove(owner)));
+      await registry.close();
       server.closeAllConnections();
       await new Promise<void>((r) => server.close(() => r()));
       await proxy?.close();

@@ -133,9 +133,11 @@ Do not share the plugin or its URL with other users.
 Open the deployed public SugarCube fixture with natural language. Confirm a real
 `open_game` call, then `observe`, `choose` and a visible screenshot. Continue at
 least ten meaningful interactions in the same ChatGPT conversation; confirm
-actual tool invocations and state continuity. Two simultaneous conversations must
-have different MCP sessions. If ChatGPT reinitializes transport sessions on every
-turn, play continuity has NOT passed; do not pretend the server retained the game.
+actual tool invocations and state continuity. Each open_game returns an opaque
+256-bit `game_id` capability. The assistant must pass it on every later game call;
+it works even when ChatGPT uses a different MCP connection for another tool.
+Two simultaneous conversations use different game handles. Never expose handles
+in narration, copy them into game pages, or silently reopen a lost game.
 
 Instructions ask the assistant to make one meaningful choice per turn, present
 the resulting scene, then stop at the next meaningful choice/revelation/emotional
@@ -161,28 +163,36 @@ remote mode. No TLS-verification bypass or network allowlist override is availab
 through production environment variables or tools. Test harnesses inject their
 own resolver/dialer and trust only a generated local fixture certificate.
 
-Each cryptographically random MCP transport session owns a separate manager,
-browser and game/snapshot namespace. The upstream short game_id is not an access
-credential. A foreign game_id cannot resolve outside its owner's map. Normal
-HTTP request completion keeps the game alive; explicit MCP DELETE, aborted
-in-flight requests, shutdown or expiry closes owned contexts and snapshots.
-An idle HTTP TCP connection closing is not an MCP DELETE; abandoned clients are
-cleaned by TTL. Games are stateful in browser memory and cannot survive redeploy.
+Each remote game has its own manager, BrowserContext and snapshot namespace.
+Remote game ids contain 32 cryptographically random bytes and are bearer
+capabilities; the original 24-bit convenience ids remain local-only. There is no
+global game listing or implicit "current game" fallback. Missing, malformed or
+unknown handles cannot enumerate or mutate another game. Possession of the full
+handle explicitly authorizes resuming that one game on a new MCP connection.
+One per-game lock serializes operations across all connections holding it.
+
+Transport DELETE and normal disconnect release only the MCP connection. They no
+longer destroy a game, because ChatGPT can use different connections per tool.
+Explicit `session(close, game_id)`, game expiry or server shutdown releases its
+browser and snapshots. Aborting an in-flight operation or exceeding its deadline
+also closes the affected game. Abandoned games have a 30-minute idle TTL and
+four-hour absolute lifetime. This is in-memory continuity across connections,
+not persistence across Render sleep, process restart or redeploy.
 
 Limits:
 
 - Sixteen lightweight MCP connections per process; two games per connection; four active contexts total.
-- Closing the last game also closes that connection's idle Chrome process. The connection
-  can open a new game later; metadata-only scans never launch Chrome.
+- Closing a game also closes its Chrome process; metadata-only scans never launch Chrome.
 - Empty MCP connections expire after 60 seconds idle (swept each minute). At capacity,
   the oldest empty connection idle for at least five seconds can be reclaimed.
   Game owners and in-flight requests are never evicted to admit a new connection.
-- Game and occupied MCP idle timeout 30 minutes; MCP absolute lifetime four hours; sweep each minute.
-- One in-flight MCP request per owner; 120 requests/minute/owner; 60 initializes/minute.
+- Game and occupied MCP idle timeout 30 minutes; game and MCP absolute lifetime four hours; sweep each minute.
+- One in-flight MCP request per connection and one operation per game, even across connections;
+  120 requests/minute/connection; 60 initializes/minute.
   Admission errors distinguish initialization rate from connection capacity and include `Retry-After`.
 - Request body 32 KiB; tool argument JSON 20,000 characters; response text about 48,000 characters.
 - Observations cap passage text at 16,000 characters; explicit truncation markers. JSON remains valid.
-- Tool deadline 45 seconds closes its owner; browser launch 20 seconds; screenshots 10 seconds.
+- Tool deadline 45 seconds closes the connection and affected game; browser launch 20 seconds; screenshots 10 seconds.
 - 1280×800 PNG viewport, maximum 5 MiB; eight snapshots per game, 1 MiB each; journal retains 200 entries.
 - Proxy maximum 64 tunnels, 32 MiB/tunnel, 20-second idle/45-second absolute tunnel timeout.
 
