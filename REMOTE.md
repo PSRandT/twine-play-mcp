@@ -38,11 +38,15 @@ misrepresented as read-only. No additional LLM, database, login or cloud saves.
 ## Private endpoint and deployment
 
 The canonical endpoint is the deployed HTTPS origin, followed by one path segment
-containing `TWMCP_SECRET`, followed by `/mcp`. **Do not publish the assembled URL**
+derived from `TWMCP_SECRET`, followed by `/mcp`. **Do not publish the assembled URL**
 in the repository, issue trackers, screenshots, logs or shared conversations.
 That URL is a bearer credential. Generate at least 128 bits of randomness; the
-service accepts 32–128 URL-safe characters. Render's `generateValue: true` supplies
-a private generated value. Rotating it invalidates the old URL; redeploy also
+service accepts 32–128 URL-safe characters unchanged, or Render's padded Base64
+encoding of 32 random bytes. Render's `generateValue: true` supplies the latter;
+the server converts it to Base64url without reducing its randomness. For the URL
+only, replace `+` with `-`, replace `/` with `_`, and remove the final `=` from
+the generated value. Leave the environment variable unchanged. Do this locally,
+not with a public online converter. Rotating it invalidates the old URL; redeploy also
 closes all browser games. Keep the value in the host's secret environment settings.
 
 Deploy `render.yaml` from your own fork as a Blueprint. It builds the Dockerfile,
@@ -50,6 +54,11 @@ uses a non-root user, installs Chromium and its sandbox, and generates the secre
 No secret is stored in Git. The Free plan is selected to avoid silently starting
 a paid service. Browser memory usage and hosting restrictions still require
 acceptance testing; free-instance sleep or restart loses active games.
+
+If an older deployment reports `TWMCP_SECRET must be ... URL-safe characters`,
+then exits before listening, deploy the Base64 secret compatibility fix. Render's
+subsequent port-scan timeout is a consequence of that startup error, not a reason
+to change `PORT` or pay for a larger instance. No secret rotation is required.
 
 **Sandbox prerequisite:** default Docker seccomp can reject Chromium's namespace
 creation. This is a tested failure, not a missing browser binary. A Docker host

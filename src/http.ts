@@ -8,6 +8,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { buildServer } from './server.js';
 import { ContextBudget, RemoteSessionManager } from './remote-session.js';
 import { createEgressProxy } from './egress-proxy.js';
+import { secretPathSegment } from './private-endpoint.js';
 
 const MAX_BODY = 32 * 1024;
 export async function createHttpService(options: {
@@ -22,8 +23,7 @@ export async function createHttpService(options: {
   sweepMs?: number;
   clock?: () => number;
 }): Promise<{ server: http.Server; close: () => Promise<void> }> {
-  if (!/^[a-zA-Z0-9_-]{32,128}$/.test(options.secret))
-    throw new Error('TWMCP_SECRET must be a cryptographically random value of 32–128 URL-safe characters.');
+  const secret = secretPathSegment(options.secret);
   const clock = options.clock ?? Date.now;
   const proxy = options.proxy ? undefined : await createEgressProxy();
   const budget = new ContextBudget(4);
@@ -66,7 +66,7 @@ export async function createHttpService(options: {
     if (!res.headersSent) res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ error: message }));
   };
-  const expected = Buffer.from(`/${options.secret}/mcp`);
+  const expected = Buffer.from(`/${secret}/mcp`);
   const server = http.createServer(async (req, res) => {
     let owner: Owner | undefined;
     let locked = false;
@@ -251,7 +251,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.env.TWMCP_MODE !== 'remote-chatgpt') throw new Error('HTTP entry requires TWMCP_MODE=remote-chatgpt');
   const report: AcceptanceReport | undefined =
     process.env.TWMCP_PUBLIC_CHECK === '1' ? { status: 'PENDING', checks: [] } : undefined;
-  const secret = process.env.TWMCP_SECRET ?? '';
+  const secret = secretPathSegment(process.env.TWMCP_SECRET ?? '');
   const service = await createHttpService({ secret, fixtures: process.env.TWMCP_SERVE_FIXTURES === '1', report });
   service.server.listen(Number(process.env.PORT ?? 3000), process.env.HOST ?? '0.0.0.0', () => {
     console.error('[twine-play-mcp] remote HTTP ready (private endpoint; URL omitted)');
