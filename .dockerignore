@@ -1,0 +1,11 @@
+.git
+node_modules
+dist
+.tools
+*.log
+.env*
+test/*
+!test/fixtures
+test/fixtures/*
+!test/fixtures/compiled
+scripts

@@ -1,3 +1,4 @@
+import { remoteRegistrar, REMOTE_INSTRUCTIONS } from './remote-profile.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
@@ -143,11 +144,11 @@ function observationText(session: GameSession, obs: Observation, sinceLast: bool
   });
 }
 
-export function buildServer(manager: SessionManager): McpServer {
+export function buildServer(manager: SessionManager, profile: 'local' | 'remote-chatgpt' = 'local'): McpServer {
   const server = new McpServer(
     { name: 'twine-play-mcp', version: VERSION },
     {
-      instructions:
+      instructions: profile === 'remote-chatgpt' ? REMOTE_INSTRUCTIONS :
         'DISPLAY POLICY — how to let the user watch a game (follow this to avoid stacking windows on their screen):\n' +
         '• Show at most ONE view per game. Pick exactly one method; never combine them.\n' +
         '• Default: call live_view(game_id) and give the user the returned URL; pass open:true only if they asked you to open it for them. Auto-open happens at most once per game.\n' +
@@ -158,7 +159,9 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  const register = profile === 'remote-chatgpt' ? remoteRegistrar(server) : server.registerTool.bind(server);
+
+  register(
     'open_game',
     {
       title: 'Open a Twine game',
@@ -193,7 +196,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'observe',
     {
       title: 'Observe the game (optionally waiting)',
@@ -238,7 +241,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'choose',
     {
       title: 'Click a choice',
@@ -284,7 +287,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'click_ui',
     {
       title: 'Click UI outside the passage',
@@ -322,7 +325,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'interact',
     {
       title: 'Fill an input or press a key',
@@ -361,7 +364,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'navigate',
     {
       title: 'Move through the story (back / restart / goto)',
@@ -410,7 +413,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'snapshot',
     {
       title: 'In-session snapshots (save / load / list)',
@@ -454,7 +457,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'find_ui',
     {
       title: 'Find a control, input or panel',
@@ -538,7 +541,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'get_variables',
     {
       title: 'Read story variables',
@@ -565,7 +568,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'get_logs',
     {
       title: 'Read console errors and the play journal',
@@ -612,7 +615,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'upload_file',
     {
       title: 'Upload a file into the game',
@@ -653,7 +656,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'download_file',
     {
       title: 'Browser downloads (list / save / newest)',
@@ -731,7 +734,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'screenshot',
     {
       title: 'Screenshot the game',
@@ -754,7 +757,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'live_view',
     {
       title: 'Show the game to the user',
@@ -800,7 +803,7 @@ export function buildServer(manager: SessionManager): McpServer {
     }
   );
 
-  server.registerTool(
+  register(
     'session',
     {
       title: 'Manage game sessions',

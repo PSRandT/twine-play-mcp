@@ -49,19 +49,22 @@
     "clarity": "tsx scripts/clarity-check.ts",
     "formats": "tsx scripts/formats.ts",
     "fixtures": "bash test/fixtures/build.sh",
-    "smoke": "tsx scripts/mcp-smoke.ts"
+    "smoke": "tsx scripts/mcp-smoke.ts",
+    "start:http": "node dist/http.js",
+    "test:remote": "npm run build && tsx --test test/remote/*.test.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
+    "ipaddr.js": "2.2.0",
     "playwright-core": "^1.63.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "tsx": "^4.23.15",
-    "typescript": "^5.9.0",
-    "@types/node": "^24.0.0"
+    "typescript": "^5.9.0"
   }
 }

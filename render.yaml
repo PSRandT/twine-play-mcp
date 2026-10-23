@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: twine-play-private
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: TWMCP_MODE
+        value: remote-chatgpt
+      - key: TWMCP_SECRET
+        generateValue: true
+      - key: TWMCP_SERVE_FIXTURES
+        value: "1"
+      - key: TWMCP_PUBLIC_CHECK
+        value: "1"

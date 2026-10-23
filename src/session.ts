@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext, type Download, type Frame, type Page } from 'playwright-core';
+import { chromium, type Browser, type BrowserContext, type Download, type Frame, type Page, type LaunchOptions, type BrowserContextOptions } from 'playwright-core';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -230,6 +230,11 @@ export class SessionManager {
     return !!this.browser && this.browserHeadless === false;
   }
 
+  protected launchOptions(): LaunchOptions { return {}; }
+  protected contextOptions(): BrowserContextOptions { return {}; }
+  protected async configureContext(_context: BrowserContext, _entryUrl: string): Promise<void> {}
+  protected persistDownloads = true;
+
   private async launchBrowser(headless: boolean): Promise<Browser> {
     const attempts: Array<Record<string, unknown>> = [];
     if (this.chromePath) attempts.push({ executablePath: this.chromePath, headless });
@@ -240,7 +245,7 @@ export class SessionManager {
     const errors: string[] = [];
     for (const opts of attempts) {
       try {
-        return await chromium.launch({ ...(opts as object), args: ['--no-first-run', '--no-default-browser-check'] });
+        return await chromium.launch({ ...(opts as object), args: ['--no-first-run', '--no-default-browser-check'], ...this.launchOptions() });
       } catch (err) {
         errors.push(String((err as Error)?.message ?? err).split('\n')[0] ?? '');
       }
@@ -282,43 +287,46 @@ export class SessionManager {
 
     const context = await browser.newContext({
       viewport: opts.viewport ?? { width: 1280, height: 800 },
-      locale: 'en-US'
+      locale: 'en-US',
+      ...this.contextOptions()
     });
-    const page = await context.newPage();
-    page.setDefaultTimeout(5000);
-
-    if (opts.blockTrackers ?? true) {
-      await context.route('**/*', (route) => {
-        const url = route.request().url();
-        if (url.endsWith('/favicon.ico')) return route.fulfill({ status: 204, body: '' });
-        if (TRACKER_PATTERN.test(url)) {
-          return route.fulfill({ status: 200, contentType: 'application/javascript', body: '/* blocked by twine-play-mcp */' });
-        }
-        return route.continue();
-      });
-    }
-
-    const id = 'game_' + crypto.randomBytes(3).toString('hex');
-    const session: GameSession = {
-      id,
-      source: opts.source,
-      entryUrl,
-      server,
-      context,
-      page,
-      console: [],
-      downloads: [],
-      lastObservation: null,
-      snapshots: new Map(),
-      journal: [],
-      step: 0,
-      seed: opts.seed ?? null
-    };
-    this.attachConsole(session);
-    this.attachDownloads(session);
-
-    await page.addInitScript({ content: bridgeSource() });
     try {
+      const page = await context.newPage();
+      page.setDefaultTimeout(5000);
+
+      if (opts.blockTrackers ?? true) {
+        await context.route('**/*', (route) => {
+          const url = route.request().url();
+          if (url.endsWith('/favicon.ico')) return route.fulfill({ status: 204, body: '' });
+          if (TRACKER_PATTERN.test(url)) {
+            return route.fulfill({ status: 200, contentType: 'application/javascript', body: '/* blocked by twine-play-mcp */' });
+          }
+          return route.continue();
+        });
+      }
+
+      await this.configureContext(context, entryUrl);
+
+      const id = 'game_' + crypto.randomBytes(3).toString('hex');
+      const session: GameSession = {
+        id,
+        source: opts.source,
+        entryUrl,
+        server,
+        context,
+        page,
+        console: [],
+        downloads: [],
+        lastObservation: null,
+        snapshots: new Map(),
+        journal: [],
+        step: 0,
+        seed: opts.seed ?? null
+      };
+      this.attachConsole(session);
+      if (this.persistDownloads) this.attachDownloads(session);
+
+      await page.addInitScript({ content: bridgeSource() });
       await page.goto(entryUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await this.waitStable(session, opts.waitTimeoutMs ?? 20000);
 
@@ -1222,6 +1230,7 @@ export class SessionManager {
   }
 
   async closeAll(): Promise<void> {
+    if (this.browserLaunch) await this.browserLaunch.catch(() => undefined);
     for (const id of [...this.sessions.keys()]) await this.close(id);
     if (this.browser) {
       await this.browser.close().catch(() => undefined);

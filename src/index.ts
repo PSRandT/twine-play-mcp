@@ -3,6 +3,10 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { SessionManager } from './session.js';
 import { buildServer } from './server.js';
 
+if (process.env.TWMCP_MODE && process.env.TWMCP_MODE !== 'local') {
+  throw new Error('The stdio entry requires local mode. For remote-chatgpt use npm run start:http.');
+}
+
 const manager = new SessionManager();
 const server = buildServer(manager);
 const transport = new StdioServerTransport();

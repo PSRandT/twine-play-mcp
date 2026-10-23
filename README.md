@@ -2,6 +2,17 @@
 
 **English** · [简体中文](README-zh.md)
 
+## ChatGPT Remote MCP
+
+This fork adds a **private, single-user** Streamable HTTP profile while preserving
+all 15 original local stdio tools. See [remote setup, security model, tests and
+limits](REMOTE.md). The baseline is `05cee6f68a4ef3ecadbb07f5d7aaa27c500a87a1`
+(package `0.2.1`). The original quick start and tool table below describe local mode.
+
+Remote mode has 11 tools and requires a private endpoint credential, sandboxed
+Chromium, and a host that permits Chromium's sandbox namespaces. A green health
+check alone does not establish browser or ChatGPT compatibility.
+
 An MCP server that lets AI agents **play, test and QA Twine / interactive-fiction HTML games**.
 
 The agent reads the current passage, clicks numbered choices, fills inputs, watches story
