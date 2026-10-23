@@ -1,12 +1,15 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { REMOTE_TOOLS } from './remote-profile.js';
+import { pathToFileURL } from 'node:url';
+import { secretPathSegment } from './private-endpoint.js';
 
 export type AcceptanceReport = {
-  status: 'PENDING' | 'RUNNING' | 'PASS' | 'FAIL';
+  status: 'NOT_RUN' | 'PENDING' | 'RUNNING' | 'PASS' | 'FAIL';
   checks: string[];
   failedStage?: string;
   timestamp?: string;
+  note?: string;
 };
 /** Runs through the PUBLIC HTTPS origin using the official MCP client. Never logs credentials,
  * game ids, or raw SDK errors (errors can contain request URLs). No browser/network bypasses. */
@@ -143,4 +146,15 @@ export async function runPublicAcceptance(origin: string, secret: string, report
     }
     report.timestamp = new Date().toISOString();
   }
+}
+
+// Explicit operator command, never imported as a production startup side effect.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const origin = process.env.TWMCP_PUBLIC_ORIGIN ?? process.env.RENDER_EXTERNAL_URL;
+  if (!origin) throw new Error('Set TWMCP_PUBLIC_ORIGIN to the public HTTPS service origin.');
+  const secret = secretPathSegment(process.env.TWMCP_SECRET ?? '');
+  const report: AcceptanceReport = { status: 'PENDING', checks: [] };
+  await runPublicAcceptance(origin, secret, report);
+  console.log(JSON.stringify(report));
+  process.exitCode = report.status === 'PASS' ? 0 : 1;
 }

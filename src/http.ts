@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
-import { runPublicAcceptance, type AcceptanceReport } from './public-check.js';
+import type { AcceptanceReport } from './public-check.js';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -273,22 +273,16 @@ export async function createHttpService(options: {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (process.env.TWMCP_MODE !== 'remote-chatgpt') throw new Error('HTTP entry requires TWMCP_MODE=remote-chatgpt');
-  const report: AcceptanceReport | undefined =
-    process.env.TWMCP_PUBLIC_CHECK === '1' ? { status: 'PENDING', checks: [] } : undefined;
+  // Production startup must not launch test browsers alongside a player's game.
+  // Ignore the legacy TWMCP_PUBLIC_CHECK flag, including on existing Render services.
+  const report: AcceptanceReport = {
+    status: 'NOT_RUN', checks: [], timestamp: new Date().toISOString(),
+    note: 'Startup browser tests are disabled. Run npm run check:public explicitly, or verify through the connected MCP client.',
+  };
   const secret = secretPathSegment(process.env.TWMCP_SECRET ?? '');
   const service = await createHttpService({ secret, fixtures: process.env.TWMCP_SERVE_FIXTURES === '1', report });
   service.server.listen(Number(process.env.PORT ?? 3000), process.env.HOST ?? '0.0.0.0', () => {
     console.error('[twine-play-mcp] remote HTTP ready (private endpoint; URL omitted)');
-    if (report) {
-      const origin = process.env.RENDER_EXTERNAL_URL ?? process.env.TWMCP_PUBLIC_ORIGIN;
-      if (!origin) {
-        report.status = 'FAIL';
-        report.failedStage = 'missing public origin';
-      } else
-        setTimeout(() => {
-          void runPublicAcceptance(origin, secret, report);
-        }, 15_000).unref();
-    }
   });
   for (const signal of ['SIGTERM', 'SIGINT'])
     process.on(signal, () => {

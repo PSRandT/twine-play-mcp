@@ -40,7 +40,7 @@ test('missing, short, malformed and path-injection secrets still fail closed', (
   ]) assert.throws(() => secretPathSegment(invalid), /TWMCP_SECRET must be/);
 });
 
-test('compiled HTTP entry starts with a Render secret and completes real SDK requests', { timeout: 20_000 }, async () => {
+test('compiled HTTP entry starts, serves SDK requests, and never launches startup browser tests', { timeout: 25_000 }, async () => {
   const reservation = net.createServer();
   await new Promise<void>((r) => reservation.listen(0, '127.0.0.1', r));
   const port = (reservation.address() as net.AddressInfo).port;
@@ -50,7 +50,9 @@ test('compiled HTTP entry starts with a Render secret and completes real SDK req
   const child = spawn(process.execPath, ['dist/http.js'], {
     cwd: new URL('../../', import.meta.url),
     env: { ...process.env, TWMCP_MODE: 'remote-chatgpt', TWMCP_SECRET: raw,
-      TWMCP_PUBLIC_CHECK: '0', TWMCP_SERVE_FIXTURES: '0', PORT: String(port), HOST: '127.0.0.1' },
+      TWMCP_PUBLIC_CHECK: '1', TWMCP_PUBLIC_ORIGIN: `https://127.0.0.1:${port}`,
+      RENDER_EXTERNAL_URL: '', TWMCP_CHROME_PATH: '/nonexistent/chromium',
+      TWMCP_SERVE_FIXTURES: '0', PORT: String(port), HOST: '127.0.0.1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const exited = once(child, 'exit');
@@ -80,6 +82,14 @@ test('compiled HTTP entry starts with a Render secret and completes real SDK req
     assert.ok(!result.isError);
     assert.ok(result.content);
     assert.ok(output.includes('remote HTTP ready'));
+    const report = await (await fetch(`${root}/acceptance.json`)).json();
+    assert.equal(report.status, 'NOT_RUN');
+    assert.deepEqual(report.checks, []);
+    // The previous startup path launched acceptance at 15 seconds. Test an old
+    // Render environment retaining the flag, not just a fresh Blueprint.
+    await delay(15_200);
+    assert.deepEqual(await (await fetch(`${root}/acceptance.json`)).json(), report);
+    assert.ok(!output.includes('[public acceptance]'));
     assert.ok(!output.includes(raw) && !output.includes(segment), 'startup must not log credentials');
   } finally {
     await transport.terminateSession().catch(() => {});

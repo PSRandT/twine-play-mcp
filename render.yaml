@@ -11,5 +11,3 @@ services:
         generateValue: true
       - key: TWMCP_SERVE_FIXTURES
         value: "1"
-      - key: TWMCP_PUBLIC_CHECK
-        value: "1"

@@ -89,13 +89,20 @@ Unauthenticated paths return 404. Browser-origin MCP requests are rejected.
 
 ## Public acceptance without sharing the credential
 
-The Blueprint enables `TWMCP_SERVE_FIXTURES=1` and `TWMCP_PUBLIC_CHECK=1` for initial
-acceptance. Only the four **unchanged** committed format fixtures are served,
+The Blueprint enables `TWMCP_SERVE_FIXTURES=1` for initial acceptance.
+Only the four **unchanged** committed format fixtures are served,
 through exact allowlisted routes `/fixtures/sugarcube.html`, `/fixtures/harlowe.html`,
 `/fixtures/snowman.html`, `/fixtures/chapbook.html`. There is no arbitrary file route.
 
-After startup, the official MCP SDK client in `src/public-check.ts` connects to
-`RENDER_EXTERNAL_URL` (or `TWMCP_PUBLIC_ORIGIN` on another host) over public HTTPS.
+Production startup does **not** run browser acceptance. The legacy
+`TWMCP_PUBLIC_CHECK` variable is ignored, even if retained in an existing Render
+service. A free-instance wake or restart must not launch test games alongside a
+player's browser. `/acceptance.json` reports `NOT_RUN` and a startup timestamp;
+that timestamp changes on process restart and does not imply a completed test.
+
+Run `npm run check:public` explicitly from an operator environment holding
+`TWMCP_SECRET` and `TWMCP_PUBLIC_ORIGIN` (or `RENDER_EXTERNAL_URL`). The official
+MCP SDK client in `src/public-check.ts` connects over public HTTPS.
 It uses the secret internally, checks initialize/tools/list/annotations, opens all
 four fixture URLs in sandboxed Chromium through the production egress policy,
 chooses branches, checks native PNG images, restores variables and snapshots,
@@ -103,13 +110,14 @@ performs ten successive choices, and checks two MCP clients' isolation.
 It closes its games/sessions afterward. This is a real public protocol/browser
 check, not a health-check substitution or mocked browser.
 
-Read the credential-free result at `/acceptance.json` and the `[public acceptance]`
-log lines. `PENDING`, `RUNNING`, `FAIL` and `PASS` are distinct. A failure names
+Read the credential-free report from the command output and `[public acceptance]`
+log lines. `NOT_RUN`, `PENDING`, `RUNNING`, `FAIL` and `PASS` are distinct. A failure names
 only the stage; raw SDK exceptions are deliberately excluded because they may
 contain the private URL. A passed report does not establish ChatGPT acceptance.
-The check runs once per process startup; it never retries or opens games on
-ordinary report reads. Disable `TWMCP_PUBLIC_CHECK` after acceptance; optionally
-disable the fixture routes as well.
+Run this resource-intensive check while no user is playing. Ordinary service
+startup, health checks and report reads never launch it. The connected ChatGPT
+plugin can also verify public game operations directly without sharing its URL.
+Optionally disable the fixture routes after acceptance.
 
 For MCP Inspector, supply the private endpoint directly in your private local
 Inspector UI, select Streamable HTTP, and connect/list/call tools. Never copy its

@@ -51,6 +51,7 @@
     "fixtures": "bash test/fixtures/build.sh",
     "smoke": "tsx scripts/mcp-smoke.ts",
     "start:http": "node dist/http.js",
+    "check:public": "node dist/public-check.js",
     "test:remote": "npm run build && tsx --test test/remote/*.test.ts"
   },
   "engines": {
