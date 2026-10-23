@@ -111,6 +111,8 @@ export class RemoteSessionManager extends SessionManager {
       throw err;
     } finally {
       this.pending--;
+      // More discovery connections must not mean more idle Chrome processes.
+      if (this.pending === 0 && this.sessions.size === 0) await super.closeAll();
     }
   }
   override get(id: string) {
@@ -175,7 +177,11 @@ export class RemoteSessionManager extends SessionManager {
     try {
       return await super.close(id);
     } finally {
-      this.budget.release();
+      try {
+        if (this.pending === 0 && this.sessions.size === 0) await super.closeAll();
+      } finally {
+        this.budget.release();
+      }
     }
   }
   async expireIdle(ttl = 30 * 60_000) {

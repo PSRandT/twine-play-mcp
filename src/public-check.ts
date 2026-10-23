@@ -44,8 +44,17 @@ export async function runPublicAcceptance(origin: string, secret: string, report
   try {
     ensure(new URL(origin).protocol === 'https:');
     stage = 'initialize';
+    // Reproduce metadata discovery followed by a distinct game connection.
+    // close() does not send MCP DELETE; abandoned scans must not block play.
+    for (let i = 0; i < 3; i++) {
+      const scan = await connect();
+      ensure((await scan.listTools()).tools.length === REMOTE_TOOLS.length);
+      await scan.close();
+    }
     const a = await connect();
     pass('initialize');
+    await call(a, 'session', { action: 'list' });
+    pass('metadata-scan-reconnect');
     stage = 'tools/list';
     const listed = (await a.listTools()).tools;
     ensure(JSON.stringify(listed.map((t) => t.name).sort()) === JSON.stringify([...REMOTE_TOOLS].sort()));

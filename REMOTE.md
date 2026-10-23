@@ -163,9 +163,15 @@ cleaned by TTL. Games are stateful in browser memory and cannot survive redeploy
 
 Limits:
 
-- Two MCP sessions per process; two games per session; four active contexts total.
-- Game and MCP idle timeout 30 minutes; MCP absolute lifetime four hours; sweep each minute.
-- One in-flight MCP request per owner; 120 requests/minute/owner; 10 initializes/minute.
+- Sixteen lightweight MCP connections per process; two games per connection; four active contexts total.
+- Closing the last game also closes that connection's idle Chrome process. The connection
+  can open a new game later; metadata-only scans never launch Chrome.
+- Empty MCP connections expire after 60 seconds idle (swept each minute). At capacity,
+  the oldest empty connection idle for at least five seconds can be reclaimed.
+  Game owners and in-flight requests are never evicted to admit a new connection.
+- Game and occupied MCP idle timeout 30 minutes; MCP absolute lifetime four hours; sweep each minute.
+- One in-flight MCP request per owner; 120 requests/minute/owner; 60 initializes/minute.
+  Admission errors distinguish initialization rate from connection capacity and include `Retry-After`.
 - Request body 32 KiB; tool argument JSON 20,000 characters; response text about 48,000 characters.
 - Observations cap passage text at 16,000 characters; explicit truncation markers. JSON remains valid.
 - Tool deadline 45 seconds closes its owner; browser launch 20 seconds; screenshots 10 seconds.

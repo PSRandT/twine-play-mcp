@@ -11,6 +11,10 @@ import { createEgressProxy } from './egress-proxy.js';
 import { secretPathSegment } from './private-endpoint.js';
 
 const MAX_BODY = 32 * 1024;
+const MAX_MCP_SESSIONS = 16;
+const MAX_INITIALIZES_PER_MINUTE = 60;
+const EMPTY_SESSION_IDLE_MS = 60_000;
+const EMPTY_SESSION_RECLAIM_MS = 5_000;
 export async function createHttpService(options: {
   secret: string;
   fixtures?: boolean;
@@ -53,9 +57,12 @@ export async function createHttpService(options: {
   const sweep = setInterval(() => {
     const now = clock();
     for (const owner of allOwners) {
+      const idleLimit = owner.manager.sessions.size === 0
+        ? Math.min(options.idleMs ?? EMPTY_SESSION_IDLE_MS, EMPTY_SESSION_IDLE_MS)
+        : (options.idleMs ?? 30 * 60_000);
       if (
         now - owner.created > (options.lifetimeMs ?? 4 * 60 * 60_000) ||
-        (!owner.busy && now - owner.touched > (options.idleMs ?? 30 * 60_000))
+        (!owner.busy && now - owner.touched > idleLimit)
       )
         void remove(owner);
       else if (!owner.busy) void owner.manager.expireIdle();
@@ -154,11 +161,28 @@ export async function createHttpService(options: {
         }
         const now = clock();
         attempts = attempts.filter((t) => now - t < 60_000);
-        if (attempts.length >= 10 || allOwners.size >= 2) {
-          reply(res, 429, 'Session limit; close a session or retry later');
+        if (attempts.length >= MAX_INITIALIZES_PER_MINUTE) {
+          res.setHeader('Retry-After', String(Math.max(1, Math.ceil((60_000 - (now - attempts[0]!)) / 1000))));
+          reply(res, 429, 'MCP initialization rate limit; retry after Retry-After seconds');
           return;
         }
         attempts.push(now);
+        // Discovery/scanning connections are lightweight and do not consume a
+        // browser slot. Reclaim an idle empty owner under pressure, never a game
+        // or a pending request. A grace period protects fresh handshakes.
+        if (allOwners.size >= MAX_MCP_SESSIONS) {
+          const candidate = [...allOwners]
+            .filter((o) => !o.busy && o.manager.sessions.size === 0 && now - o.touched >= EMPTY_SESSION_RECLAIM_MS)
+            .sort((a, b) => a.touched - b.touched)[0];
+          if (candidate) await remove(candidate);
+        }
+        // Cleanup awaits can interleave with other initializes. Recheck before
+        // reserving a slot below; no await occurs between this check and add().
+        if (allOwners.size >= MAX_MCP_SESSIONS) {
+          res.setHeader('Retry-After', '5');
+          reply(res, 429, 'MCP connection capacity reached; retry after Retry-After seconds');
+          return;
+        }
         const manager = options.managerFactory
           ? options.managerFactory(options.proxy ?? proxy!.url, budget)
           : new RemoteSessionManager(options.proxy ?? proxy!.url, budget);
